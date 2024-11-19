@@ -109,7 +109,7 @@ struct _IndicatorSessionServicePrivate
   GSimpleAction * header_action;
   GSimpleAction * user_switcher_action;
   GSimpleAction * guest_switcher_action;
-  GSimpleAction * usage_mode_action;
+  GAction * usage_mode_action;
   GHashTable * users;
   GHashTable * reported_users;
   guint rebuild_id;
@@ -350,27 +350,6 @@ get_current_real_name (IndicatorSessionService * self)
   return "";
 }
 
-static gboolean
-usage_mode_to_action_state(GValue *value,
-                           GVariant *variant,
-                           __attribute__((unused)) gpointer unused)
-{
-  const gchar* usage_mode = g_variant_get_string(variant, NULL);
-  GVariant* ret_var = g_variant_new_boolean(g_strcmp0(usage_mode, "Windowed") == 0 ? TRUE : FALSE);
-  g_value_set_variant(value, ret_var);
-  return TRUE;
-}
-
-static GVariant*
-action_state_to_usage_mode(const GValue *value,
-                           __attribute__((unused)) const GVariantType * unused_expected_type,
-                           __attribute__((unused)) gpointer unused)
-{
-  GVariant* var = g_value_get_variant(value);
-  GVariant* ret = g_variant_new_string(g_variant_get_boolean(var) == TRUE ? "Windowed" : "Staged");
-  return ret;
-}
-
 static void
 on_usage_mode_setting_changed (gpointer gself)
 {
@@ -454,11 +433,23 @@ create_admin_section (IndicatorSessionService * self)
 
   if (p->usage_mode_action && ayatana_common_utils_is_lomiri())
   {
-      GMenuItem * menu_item = NULL;
-      menu_item = g_menu_item_new(_("Desktop mode"), "indicator.usage-mode");
-      g_menu_item_set_attribute(menu_item, "x-ayatana-type", "s", "org.ayatana.indicator.switch");
-      g_menu_append_item(menu, menu_item);
+      GMenu * usage_mode_menu = g_menu_new();
+      GMenuItem * menu_item;
+
+      menu_item = g_menu_item_new(_("Automatic"), "force-usage-mode::automatic");
+      g_menu_append_item(usage_mode_menu, menu_item);
       g_object_unref(menu_item);
+
+      menu_item = g_menu_item_new(_("Desktop"), "force-usage-mode::windowed");
+      g_menu_append_item(usage_mode_menu, menu_item);
+      g_object_unref(menu_item);
+
+      menu_item = g_menu_item_new(_("Staged"), "force-usage-mode::staged");
+      g_menu_append_item(usage_mode_menu, menu_item);
+      g_object_unref(menu_item);
+
+      g_menu_append_section(menu, _("Mode"), G_MENU_MODEL(usage_mode_menu));
+      g_object_unref(usage_mode_menu);
   }
 
   gboolean bShowBugReport = g_settings_get_boolean (self->priv->indicator_settings, "show-bug-report");
@@ -1161,21 +1152,11 @@ init_gactions (IndicatorSessionService * self)
   /* add usage-mode action */
   if (p->usage_mode_settings)
     {
-      a = g_simple_action_new_stateful("usage-mode",
-                                       NULL,
-                                       g_variant_new_boolean(FALSE));
-      g_settings_bind_with_mapping(p->usage_mode_settings, "usage-mode",
-                                   a, "state",
-                                   G_SETTINGS_BIND_DEFAULT,
-                                   usage_mode_to_action_state,
-                                   action_state_to_usage_mode,
-                                   NULL,
-                                   NULL);
-
-      g_action_map_add_action(G_ACTION_MAP(p->actions), G_ACTION(a));
-      g_signal_connect_swapped(p->usage_mode_settings, "changed::usage-mode",
+      p->usage_mode_action = g_settings_create_action(p->usage_mode_settings, "force-usage-mode");
+      g_action_map_add_action(G_ACTION_MAP(p->actions), p->usage_mode_action);
+      // FIXME needed?
+      g_signal_connect_swapped(p->usage_mode_settings, "changed::force-usage-mode",
                                G_CALLBACK(on_usage_mode_setting_changed), self);
-      p->usage_mode_action = a;
     }
 
   /* add the header action */
